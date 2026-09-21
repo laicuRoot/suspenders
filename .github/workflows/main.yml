@@ -30,6 +30,13 @@ jobs:
 
   test-template:
     runs-on: ubuntu-latest
+    name: Template (${{ matrix.paas }})
+    strategy:
+      fail-fast: false
+      matrix:
+        paas:
+          - heroku
+          - railway
 
     services:
       postgres:
@@ -89,26 +96,26 @@ jobs:
           end
           EOF
       - name: Verify Heroku deployment files
-  if: matrix.paas == 'heroku'
-  working-directory: /tmp/test_app
-  run: |
-    test -f Procfile || (echo "Procfile not found" && exit 1)
-    test -f config/initializers/sidekiq.rb || (echo "sidekiq initializer not found" && exit 1)
-    test ! -f railway.json || (echo "railway.json should not be generated" && exit 1)
-- name: Verify Railway deployment files
-  if: matrix.paas == 'railway'
-  working-directory: /tmp/test_app
-  run: |
-    test -f railway.json || (echo "railway.json not found" && exit 1)
-    test ! -f Procfile || (echo "Procfile should not be generated" && exit 1)
-    test ! -f Dockerfile || (echo "Dockerfile should not be generated" && exit 1)
-    test ! -f config/initializers/sidekiq.rb || (echo "sidekiq initializer should not be generated" && exit 1)
-    test ! -f db/queue_schema.rb || (echo "db/queue_schema.rb should have become a migration" && exit 1)
-    test ! -f db/cache_schema.rb || (echo "db/cache_schema.rb should have become a migration" && exit 1)
-    test ! -f db/cable_schema.rb || (echo "db/cable_schema.rb should have become a migration" && exit 1)
-    grep -q solid_queue_jobs db/schema.rb || (echo "Solid Queue tables missing from db/schema.rb" && exit 1)
-    ! grep -q connects_to config/environments/production.rb config/cable.yml || (echo "Solid gems still point at separate databases" && exit 1)
-- name: Verify AI harness files exist
+        if: matrix.paas == 'heroku'
+        working-directory: /tmp/test_app
+        run: |
+          test -f Procfile || (echo "Procfile not found" && exit 1)
+          test -f config/initializers/sidekiq.rb || (echo "sidekiq initializer not found" && exit 1)
+          test ! -f railway.json || (echo "railway.json should not be generated" && exit 1)
+      - name: Verify Railway deployment files
+        if: matrix.paas == 'railway'
+        working-directory: /tmp/test_app
+        run: |
+          test -f railway.json || (echo "railway.json not found" && exit 1)
+          test ! -f Procfile || (echo "Procfile should not be generated" && exit 1)
+          test ! -f Dockerfile || (echo "Dockerfile should not be generated" && exit 1)
+          test ! -f config/initializers/sidekiq.rb || (echo "sidekiq initializer should not be generated" && exit 1)
+          test ! -f db/queue_schema.rb || (echo "db/queue_schema.rb should have become a migration" && exit 1)
+          test ! -f db/cache_schema.rb || (echo "db/cache_schema.rb should have become a migration" && exit 1)
+          test ! -f db/cable_schema.rb || (echo "db/cable_schema.rb should have become a migration" && exit 1)
+          grep -q solid_queue_jobs db/schema.rb || (echo "Solid Queue tables missing from db/schema.rb" && exit 1)
+          ! grep -q connects_to config/environments/production.rb config/cable.yml || (echo "Solid gems still point at separate databases" && exit 1)
+      - name: Verify AI harness files exist
         working-directory: /tmp/test_app
         run: |
           test -f .claude/CLAUDE.md || (echo ".claude/CLAUDE.md not found" && exit 1)
