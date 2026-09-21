@@ -66,7 +66,7 @@ Railway apps additionally use:
 
 - `DATABASE_URL` - Connection string for the Postgres database (required)
 - `SOLID_QUEUE_IN_PUMA` - Set to `true` to run Solid Queue inside the Puma process
-- `RAILS_MAX_THREADS` - Puma threads and database pool size, shared with Solid Queue when it runs inside Puma (optional)
+- `RAILS_MAX_THREADS` - Puma threads and database pool size per process. Solid Queue's Puma plugin forks its own processes, each with a pool of this size (optional)
 
 ## Deployment
 

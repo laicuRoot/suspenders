@@ -212,7 +212,7 @@ end
 
 def configure_ci
   # https://thoughtbot.com/blog/rspec-rails-github-actions-configuration
-  append_to_file ".github/workflows/ci.yml", "\n" + <<~YAML.gsub(/^/, "  ")
+  ci = <<~YAML.gsub(/^/, "  ")
     test:
       runs-on: ubuntu-latest
 
@@ -260,6 +260,15 @@ def configure_ci
             path: ${{ github.workspace }}/tmp/capybara
             if-no-files-found: ignore
   YAML
+
+  # The commented-out Redis service is a hint for Sidekiq apps. Railway apps
+  # run Solid Queue on Postgres and never need it.
+  if railway?
+    ci.sub!(/^ *# redis:\n(?: *#   .*\n)+ *\n/, "")
+    ci.sub!(/^ *# REDIS_URL:.*\n/, "")
+  end
+
+  append_to_file ".github/workflows/ci.yml", "\n" + ci
 end
 
 def configure_sidekiq
@@ -688,7 +697,7 @@ def readme_environment_variables
       - `SOLID_QUEUE_IN_PUMA` - Set to `true` to run Solid Queue inside the Puma process (recommended until job volume justifies a separate service)
       - `APPLICATION_HOST` - The domain where your application is hosted (optional, defaults to `RAILWAY_PUBLIC_DOMAIN`)
       - `ASSET_HOST` - CDN or asset host URL (optional)
-      - `RAILS_MAX_THREADS` - Puma threads and database pool size. Solid Queue workers share this pool when running inside Puma, so raise it if you see connection timeouts (optional)
+      - `RAILS_MAX_THREADS` - Puma threads and database pool size per process. Solid Queue's Puma plugin forks its own supervisor and worker processes, each with a pool of this size, so expect roughly a dozen Postgres connections at the defaults (optional)
     MARKDOWN
   else
     <<~MARKDOWN.chomp
