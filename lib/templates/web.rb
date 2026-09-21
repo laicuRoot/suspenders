@@ -27,6 +27,10 @@ def install_gems
   gem "inline_svg"
   gem "strong_migrations"
 
+  # TODO: Remove once Rails supports json 3.0, which made the options to
+  # JSON.parse keyword-only. ActiveSupport::JSON.decode still passes a Hash.
+  gem "json", "< 3"
+
   gem_group :test do
     # TODO: How can we ensure we're notified of new releases?
     gem "action_dispatch-testing-integration-capybara",
