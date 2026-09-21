@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.homepage = "http://github.com/thoughtbot/suspenders"
   spec.summary = "Rails generators using thoughtbot's best practices."
   spec.description = <<~HERE
-    Suspenders is intended to create a new Rails applications, and is optimized for deployment on Heroku.
+    Suspenders is intended to create a new Rails applications, and is optimized for deployment on Heroku or Railway.
     It is used by thoughtbot to get a jump start on new apps. Use Suspenders if you're in a rush to build something amazing; don't use it if you like missing deadlines.
   HERE
 

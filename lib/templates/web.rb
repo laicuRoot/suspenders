@@ -8,11 +8,23 @@ def source_paths
   Array(super) + [__dir__]
 end
 
+# The target platform is handed over by `Suspenders::CLI` through the
+# environment. Defaults to Heroku so `rails new -m web.rb` keeps working.
+def paas
+  ENV.fetch("SUSPENDERS_PAAS", "heroku")
+end
+
+def railway?
+  paas == "railway"
+end
+
 def install_gems
-  uncomment_lines "Gemfile", /gem\s"redis"/
+  unless railway?
+    uncomment_lines "Gemfile", /gem\s"redis"/
+    gem "sidekiq"
+  end
 
   gem "inline_svg"
-  gem "sidekiq"
   gem "strong_migrations"
 
   gem_group :test do
@@ -53,8 +65,12 @@ after_bundle do
   configure_database
   configure_test_suite
   configure_ci
-  configure_sidekiq
-  configure_action_cable
+  if railway?
+    configure_solid_single_database
+  else
+    configure_sidekiq
+    configure_action_cable
+  end
   configure_strong_migrations
   configure_prosopite
   configure_mailer_interceptor
@@ -68,8 +84,12 @@ after_bundle do
   setup_application
 
   # Deployment and server
-  update_bin_dev
-  add_procfiles
+  if railway?
+    add_railway_config
+  else
+    update_bin_dev
+    add_procfiles
+  end
 
   # Views
   update_layout
@@ -93,11 +113,63 @@ def consolidate_gemfile_groups
 end
 
 def configure_database
-  gsub_file "config/database.yml", /^production:.*?password:.*?\n/m, <<~YAML
+  # With the Solid ecosystem enabled, the production block declares primary,
+  # cache, queue, and cable databases and is the last block in the file.
+  # Without it, the block ends at the password line.
+  pattern = railway? ? /^production:.*\z/m : /^production:.*?password:.*?\n/m
+
+  gsub_file "config/database.yml", pattern, <<~YAML
     production:
       <<: *default
       url: <%= ENV["DATABASE_URL"] %>
   YAML
+end
+
+# Run Solid Queue, Solid Cache, and Solid Cable on the primary database instead
+# of the three extra databases Rails generates. Follows the single-database
+# instructions of each gem:
+#
+# https://github.com/rails/solid_queue#single-database-configuration
+# https://github.com/rails/solid_cache#single-database-configuration
+# https://github.com/rails/solid_cable#single-database-configuration
+def configure_solid_single_database
+  base_time = Time.now.utc
+  migration_version = "#{Rails::VERSION::MAJOR}.#{Rails::VERSION::MINOR}"
+
+  %w[queue cache cable].each_with_index do |name, index|
+    schema_path = "db/#{name}_schema.rb"
+    class_name = "CreateSolid#{name.capitalize}Tables"
+
+    body = File.read(schema_path)
+      .sub(/\AActiveRecord::Schema\[[\d.]+\]\.define\(version: \d+\) do\n/, "")
+      .sub(/\nend\n?\z/, "\n")
+      .gsub(", force: :cascade", "")
+      .gsub(/^(?=.)/, "    ")
+
+    # Offset timestamps so the three migrations never share a version.
+    version = (base_time + index).strftime("%Y%m%d%H%M%S")
+
+    # Strong Migrations flags the foreign keys in the queue schema; these
+    # tables are brand new, so the schema is safe to load as-is.
+    create_file "db/migrate/#{version}_#{class_name.underscore}.rb", [
+      "class #{class_name} < ActiveRecord::Migration[#{migration_version}]",
+      "  def change",
+      "    safety_assured do",
+      body.chomp,
+      "    end",
+      "  end",
+      "end",
+      ""
+    ].join("\n")
+
+    remove_file schema_path
+  end
+
+  gsub_file "config/environments/production.rb", /^\s*config\.solid_queue\.connects_to = .*\n/, ""
+  gsub_file "config/cache.yml", /^  database: .*\n/, ""
+  gsub_file "config/cable.yml", /^  connects_to:\n    database:\n      writing: cable\n/, ""
+
+  environment "config.active_job.queue_adapter = :inline", env: "test"
 end
 
 def configure_test_suite
@@ -301,7 +373,14 @@ def setup_production_environment
   environment "config.sandbox_by_default = true", env: "production"
   environment "config.active_record.action_on_strict_loading_violation = :log", env: "production"
   gsub_file "config/environments/production.rb", /# config\.asset_host =.*$/, 'config.asset_host = ENV["ASSET_HOST"]'
-  gsub_file "config/environments/production.rb", /config\.action_mailer\.default_url_options = \{ host: .*? \}/, 'config.action_mailer.default_url_options = { host: ENV.fetch("APPLICATION_HOST") }'
+  # Railway exposes the generated domain as RAILWAY_PUBLIC_DOMAIN, so
+  # APPLICATION_HOST only needs to be set once a custom domain is attached.
+  host = if railway?
+    'ENV.fetch("APPLICATION_HOST") { ENV.fetch("RAILWAY_PUBLIC_DOMAIN") }'
+  else
+    'ENV.fetch("APPLICATION_HOST")'
+  end
+  gsub_file "config/environments/production.rb", /config\.action_mailer\.default_url_options = \{ host: .*? \}/, "config.action_mailer.default_url_options = { host: #{host} }"
 end
 
 def setup_application
@@ -338,6 +417,10 @@ def add_procfiles
   copy_file "Procfile.dev"
 end
 
+def add_railway_config
+  copy_file "railway.json"
+end
+
 def update_layout
   # General partials
   copy_file "app/views/application/_form_errors.html.erb"
@@ -371,7 +454,7 @@ def update_readme
 
       ## Local Development
 
-      Run `bin/dev` to start the web server and Sidekiq worker. Then, navigate to [http://localhost:3000][local]
+      #{readme_local_development}
 
       [local]: http://localhost:3000
 
@@ -416,10 +499,8 @@ def update_readme
 
       The following environment variables are available in `production`:
 
-      - `APPLICATION_HOST` - The domain where your application is hosted (required)
-      - `ASSET_HOST` - CDN or asset host URL (optional)
-      - `RAILS_MASTER_KEY` - Used for decrypting credentials (required)
-
+      #{readme_environment_variables}
+      #{readme_deployment}
       ## Rails Console
 
       In deployed environments, the Rails console starts in sandbox mode by default. This means any changes made in the console will be rolled back when you exit.
@@ -535,11 +616,7 @@ def update_readme
 
       ## Jobs
 
-      Uses [Sidekiq][] for [background job][] processing.
-
-      Configures the `test` environment to use the [inline][] adapter.
-
-      [Sidekiq]: https://github.com/sidekiq/sidekiq
+      #{readme_jobs}
       [background job]: https://guides.rubyonrails.org/active_job_basics.html
       [inline]: https://api.rubyonrails.org/classes/ActiveJob/QueueAdapters/InlineAdapter.html
 
@@ -587,6 +664,91 @@ def update_readme
 
       [AI rules]: https://github.com/thoughtbot/guides/tree/main/rails/ai-rules
       [thoughtbot/guides]: https://github.com/thoughtbot/guides
+    MARKDOWN
+  end
+end
+
+def readme_local_development
+  if railway?
+    <<~MARKDOWN.chomp
+      Run `bin/dev` to start the web server. Then, navigate to [http://localhost:3000][local]
+
+      Jobs run in-process with the `:async` adapter in development. Run `bin/jobs` alongside the web server to exercise Solid Queue locally.
+    MARKDOWN
+  else
+    "Run `bin/dev` to start the web server and Sidekiq worker. Then, navigate to [http://localhost:3000][local]"
+  end
+end
+
+def readme_environment_variables
+  if railway?
+    <<~MARKDOWN.chomp
+      - `DATABASE_URL` - Connection string for the Postgres database (required)
+      - `RAILS_MASTER_KEY` - Used for decrypting credentials (required)
+      - `SOLID_QUEUE_IN_PUMA` - Set to `true` to run Solid Queue inside the Puma process (recommended until job volume justifies a separate service)
+      - `APPLICATION_HOST` - The domain where your application is hosted (optional, defaults to `RAILWAY_PUBLIC_DOMAIN`)
+      - `ASSET_HOST` - CDN or asset host URL (optional)
+      - `RAILS_MAX_THREADS` - Puma threads and database pool size. Solid Queue workers share this pool when running inside Puma, so raise it if you see connection timeouts (optional)
+    MARKDOWN
+  else
+    <<~MARKDOWN.chomp
+      - `APPLICATION_HOST` - The domain where your application is hosted (required)
+      - `ASSET_HOST` - CDN or asset host URL (optional)
+      - `RAILS_MASTER_KEY` - Used for decrypting credentials (required)
+    MARKDOWN
+  end
+end
+
+def readme_deployment
+  return "" unless railway?
+
+  <<~MARKDOWN
+
+    ## Deployment
+
+    Deploys to [Railway][]. `railway.json` configures the build (Railpack), the
+    pre-deploy command (`bin/rails db:prepare`), the start command, and the
+    `/up` healthcheck, so the dashboard needs no build or deploy settings.
+
+    To deploy for the first time:
+
+    1. Create a Railway project and add a Postgres database.
+    2. Add a service from this repository.
+    3. Set the service variables:
+
+    ```
+    DATABASE_URL=${{Postgres.DATABASE_URL}}
+    RAILS_MASTER_KEY=<contents of config/master.key>
+    SOLID_QUEUE_IN_PUMA=true
+    ```
+
+    4. Generate a public domain under the service's Networking settings.
+
+    Solid Queue, Solid Cache, and Solid Cable all run on the primary Postgres
+    database, so no Redis is required. When job volume grows, add a second
+    service from the same repository with the start command `bin/jobs` and
+    remove `SOLID_QUEUE_IN_PUMA` from the web service.
+
+    [Railway]: https://railway.com
+  MARKDOWN
+end
+
+def readme_jobs
+  if railway?
+    <<~MARKDOWN.chomp
+      Uses [Solid Queue][] for [background job][] processing, backed by the primary Postgres database.
+
+      Configures the `test` environment to use the [inline][] adapter.
+
+      [Solid Queue]: https://github.com/rails/solid_queue
+    MARKDOWN
+  else
+    <<~MARKDOWN.chomp
+      Uses [Sidekiq][] for [background job][] processing.
+
+      Configures the `test` environment to use the [inline][] adapter.
+
+      [Sidekiq]: https://github.com/sidekiq/sidekiq
     MARKDOWN
   end
 end

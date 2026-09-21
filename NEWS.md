@@ -1,5 +1,6 @@
 Unreleased
 
+* Added: `--paas` flag for `suspenders new`. Pass `--paas=railway` to generate an app for [Railway](https://railway.com) that keeps Solid Queue, Solid Cache, and Solid Cable on a single Postgres database and ships a `railway.json`. Defaults to `heroku`, which is unchanged.
 * Added: AI harness. Downloads `.claude/CLAUDE.md` and `.claude/rules/` from [thoughtbot/guides](https://github.com/thoughtbot/guides/tree/main/rails/ai-rules).
 * Added: [letter_opener](https://github.com/ryanb/letter_opener) for email previews in development
 * Added: [prosopite](https://github.com/charkost/prosopite) for N+1 query detection in development and test
