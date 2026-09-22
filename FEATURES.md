@@ -1,5 +1,8 @@
 # Features
 
+Some features depend on the target platform chosen with `--paas` (`heroku`,
+the default, or `railway`). Those sections say so.
+
 ## Local Development
 
 ### Hotwire Spark
@@ -55,9 +58,30 @@ a clean slate for development.
 
 The following environment variables are available in `production`:
 
-- `APPLICATION_HOST` - The domain where your application is hosted (required)
+- `APPLICATION_HOST` - The domain where your application is hosted (required on Heroku; optional on Railway, where it defaults to `RAILWAY_PUBLIC_DOMAIN`)
 - `ASSET_HOST` - CDN or asset host URL (optional)
 - `RAILS_MASTER_KEY` - Used for decrypting credentials (required)
+
+Railway apps additionally use:
+
+- `DATABASE_URL` - Connection string for the Postgres database (required)
+- `SOLID_QUEUE_IN_PUMA` - Set to `true` to run Solid Queue inside the Puma process
+- `RAILS_MAX_THREADS` - Puma threads and database pool size per process. Solid Queue's Puma plugin forks its own processes, each with a pool of this size (optional)
+
+## Deployment
+
+### Heroku (default)
+
+Generates a `Procfile` with `release`, `web`, and `worker` processes. Jobs use
+Sidekiq backed by Redis.
+
+### Railway (`--paas=railway`)
+
+Generates a `railway.json` that configures the Railpack builder, a pre-deploy
+`bin/rails db:prepare`, the start command, and the `/up` healthcheck. Skips
+Docker, Kamal, and Thruster. Solid Queue, Solid Cache, and Solid Cable are
+kept and collapsed onto the primary Postgres database, so no Redis is
+required.
 
 ## Configuration
 
@@ -159,11 +183,13 @@ Interceptor can be found at `lib/email_interceptor.rb`.
 
 ## Jobs
 
-Uses [Sidekiq][] for [background job][] processing.
+Uses [Sidekiq][] for [background job][] processing on Heroku, and
+[Solid Queue][] on Railway.
 
 Configures the `test` environment to use the [inline][] adapter.
 
 [Sidekiq]: https://github.com/sidekiq/sidekiq
+[Solid Queue]: https://github.com/rails/solid_queue
 [background job]: https://guides.rubyonrails.org/active_job_basics.html
 [inline]: https://api.rubyonrails.org/classes/ActiveJob/QueueAdapters/InlineAdapter.html
 

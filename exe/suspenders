@@ -2,36 +2,55 @@
 
 require_relative "../lib/suspenders"
 
-if ARGV.length > 2 || ARGV.length == 0
-  puts "Error: Invalid command"
-  puts "Available commands are"
-  puts "suspenders new APP_NAME"
-  puts "suspenders -v"
+USAGE = <<~USAGE
+  Available commands are
+  suspenders new APP_NAME [--paas=#{Suspenders::CLI::PAAS_OPTIONS.join("|")}]
+  suspenders -v
+USAGE
+
+def usage_error(message)
+  puts "Error: #{message}"
+  puts USAGE
   exit 1
 end
 
+usage_error("Invalid command") if ARGV.empty?
+
 command = ARGV[0]
 app_name = ARGV[1]
+rest = ARGV[2..] || []
 
 if ["-v", "--version"].include?(command)
   puts Suspenders::VERSION
   exit 0
-elsif ["new"].include?(command)
-  if app_name.nil? || app_name.empty?
-    puts "Error: Application name required"
-    puts "Usage: suspenders new APP_NAME"
-    exit 1
-  end
-else
-  puts "Error: Invalid command"
-  puts "Available commands are"
-  puts "suspenders new APP_NAME"
-  puts "suspenders -v"
+elsif command != "new"
+  usage_error("Invalid command")
+end
+
+if app_name.nil? || app_name.empty? || app_name.start_with?("-")
+  puts "Error: Application name required"
+  puts "Usage: suspenders new APP_NAME [--paas=#{Suspenders::CLI::PAAS_OPTIONS.join("|")}]"
   exit 1
 end
 
+paas = Suspenders::CLI::DEFAULT_PAAS
+
+until rest.empty?
+  arg = rest.shift
+
+  case arg
+  when /\A--paas=(.+)\z/
+    paas = $1
+  when "--paas"
+    paas = rest.shift
+    usage_error("--paas requires a value") if paas.nil? || paas.empty?
+  else
+    usage_error("Unknown option #{arg.inspect}")
+  end
+end
+
 begin
-  Suspenders::CLI.run(app_name)
+  Suspenders::CLI.run(app_name, paas: paas)
   exit 0
 rescue Suspenders::Error => e
   abort "Error: #{e.message}"
