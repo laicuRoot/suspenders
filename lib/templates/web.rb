@@ -63,7 +63,6 @@ install_gems
 
 after_bundle do
   consolidate_gemfile_groups
-  commit_initial_application_state
 
   # Initializers & Configuration
   configure_database
@@ -106,10 +105,6 @@ after_bundle do
   commit_final_application_state
 
   print_message
-end
-
-def commit_initial_application_state
-  git add: ".", commit: %(-m 'Initial commit from rails new') unless ENV["CI"]
 end
 
 def consolidate_gemfile_groups
@@ -790,7 +785,7 @@ def add_ai_harness
 end
 
 def commit_final_application_state
-  git add: ".", commit: %(-m 'Changes introduced by Suspenders version #{Suspenders::VERSION}') unless ENV["CI"]
+  git add: ".", commit: %(-m 'Initial commit') unless ENV["CI"]
 end
 
 def print_message
